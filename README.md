@@ -9,7 +9,7 @@ A private, lilac-themed Russian study website built for 30–60 minutes of daily
 - 70 starter words with topics, transliterations, favourites, Russian browser speech
 - Spaced-review flashcards (Again / Hard / Good / Easy), multiple-choice practice, Cyrillic typing practice
 - Grammar reference cards, daily journal, vocabulary notes
-- Local browser saving, JSON import/export and optional Supabase account sync
+- Local browser saving, JSON import/export and optional passwordless Supabase sync
 - Mobile-friendly layout, keyboard navigation, zero required packages
 
 ## Use it locally
@@ -47,22 +47,32 @@ The website automatically saves all changes to browser `localStorage`, under `ru
 
 When you later publish from `file:///` to GitHub Pages, your browser considers the GitHub URL a different site. Export locally, then import once on the published site, or set up cloud sync.
 
-## Optional cloud sync using Supabase (free tier is usually enough)
+## Automatic cloud sync — one secret code, no email login
 
-This is optional and **manual**: click Upload after you study on one device; click Load from cloud before you study on the other. Local progress is the default and works without Supabase.
+Cloud sync is optional. The site always saves instantly in the browser and works offline. Once connected, it also **automatically uploads changes** to Supabase after a short pause, and **checks the cloud whenever you open or return to the site**. No account or email address is required on the website.
 
-1. Create a project at https://supabase.com/.
-2. In Supabase **SQL Editor**, paste and run `supabase-schema.sql`. It creates `public.user_state`, enables row-level security and restricts each signed-in user to their own row.
-3. In **Authentication → Providers**, ensure **Email** is enabled (email OTP/magic links).
-4. In **Authentication → URL Configuration**, add your published GitHub Pages URL, e.g. `https://YOUR_USERNAME.github.io/russki-ugolok/`, to **Redirect URLs**. You may also add `http://localhost:8000/` if testing locally. If Supabase requests a Site URL, use your published address.
-5. From **Project Settings → API Keys** (may be labelled **Connect** or **Data API** in updated Supabase), copy the **Project URL** and the **publishable / anon key** to your website’s **Settings → Cloud sync**. **Never use a `service_role`, secret or private key here.**
-6. Click **Save cloud configuration**, type your email, then **Email me a sign-in link**. Open it and return to the website.
-7. Click **Check login**. Once signed in, click **Upload this device** to store your progress in your private Supabase row.
-8. On another device, set the same URL/key, sign in with the same email, then **Load from cloud**.
+### One-time setup (about five steps)
 
-**Important:** Cloud sync is **manual**, not real-time or automatic. Upload overwrites the existing cloud copy. Load overwrites the local copy. Use a JSON backup before large changes or a first sync. The site does not email your journal to anyone; Supabase stores whatever is in the uploaded JSON payload in your database.
+1. Create or open your free project at https://supabase.com/dashboard. If you already created one for the earlier version of this website, **reuse it**.
+2. In **SQL Editor → New query**, paste the **entire updated `supabase-schema.sql`** file and click **Run**. The result shows a UUID under **COPY THIS PRIVATE SYNC CODE INTO THE WEBSITE**. Copy and privately store it. Rerunning the SQL keeps the existing code and existing cloud progress.
+3. In **Project Settings → API Keys**, copy your **Project URL** and **publishable key** (or the legacy **anon** key). Never put a `service_role` or secret key into the site.
+4. On your Russian website, go to **Settings → Cloud sync**. Paste the **Project URL**, **publishable/anon key** and **private sync code**. Click **Connect & sync**.
+5. On your other device, open the same website and enter the same three values once. From then on, changes sync automatically; you do not need to log in or press Save.
 
-**Privacy note:** Supabase keys are stored in browser localStorage on the device, and are designed to be publicly usable only when your database has properly configured row-level-security policies. Restrict access using the supplied SQL and never commit secret/server keys.
+Your existing local study progress is preserved. If the cloud is empty, the website uploads your current progress. If this browser is empty but your cloud already has progress, it downloads that progress automatically. If **both** contain different work, the site asks you to choose which to keep. It will not silently overwrite your writing. A JSON export is a good precaution before the first connection.
+
+### Security and limitations
+
+- The URL and publishable/anon key are designed to be public. The **sync code is private**, works like an access key, and is stored only in your browser. **Do not publish it on GitHub, paste it into screenshots, or share it.**
+- The SQL disables direct browser access to the study database table, and exposes only two functions which verify the unguessable sync code.
+- The code is a bearer secret: someone who obtains it could read or modify your study data. Supabase also remains the administrator of the database. For a personal hobby site, this removes login while protecting against casual public access.
+- Sync runs when online, after local changes, on opening the page, and on returning to the tab. It is **not** live character-by-character collaboration. If two devices change the same progress simultaneously, the site flags a conflict; in Settings, choose **Keep this device** or **Use cloud save** after exporting a backup if needed.
+- Clearing your browser's site data removes the saved configuration and local copy. The cloud copy remains; enter the three connection values again to recover it.
+- The existing email-login Supabase table, if you created it in the previous version, is left untouched. This new version uses `russki_single_save` and the two new RPC functions instead.
+
+### Updating an existing deployed copy
+
+If your site is already live on GitHub Pages, you do **not** need a new repository. Replace these files in the repository root with the updated versions: `index.html`, `app.js`, `cloud.js`, `supabase-schema.sql` (and optionally this `README.md`). Commit the changes, then refresh the published site after the GitHub Actions deployment finishes. Your browser progress is retained.
 
 ## Customize
 

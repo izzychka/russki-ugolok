@@ -16,8 +16,18 @@
   }
   function validate(v) { return !!v && typeof v==='object' && Array.isArray(v.completed) && Array.isArray(v.favorites) && v.days && typeof v.days==='object' && v.cards && typeof v.cards==='object' && v.journal && typeof v.journal==='object'; }
   let state = load();
-  function save() { try {localStorage.setItem(STORE,JSON.stringify(state));} catch {toast('Storage is full or blocked. Export your data to keep a copy.');} }
-  let ui = {page:'dashboard',lesson:null,wordTopic:'All',wordSearch:'',practice:'cards',queue:[],flipped:false,quiz:null,typing:null,openGrammar:null,cloudMessage:'Connect Supabase in Settings to sync your progress between devices.',cloudUser:null,cloudLoading:false};
+  let cloudTimer = null;
+  const CHECKPOINT_KEY = 'russki_cloud_checkpoint_v2';
+  // Browser saving always happens immediately. Cloud saving is debounced.
+  function save() {
+    try {localStorage.setItem(STORE,JSON.stringify(state));}
+    catch {toast('Storage is full or blocked. Export your data to keep a copy.');}
+    if(window.RusskiCloud?.isConfigured()) {
+      clearTimeout(cloudTimer);
+      cloudTimer=setTimeout(()=>syncCloud(),1300);
+    }
+  }
+  let ui = {page:'dashboard',lesson:null,wordTopic:'All',wordSearch:'',practice:'cards',queue:[],flipped:false,quiz:null,typing:null,openGrammar:null,cloudMessage:window.RusskiCloud?.isConfigured()?'Connecting to your private cloud save…':'Local saving is on. Add your private sync code to save between devices.',cloudLoading:false};
   const timer = {running:false,elapsed:0,started:0};
   function timeElapsed() {return timer.elapsed + (timer.running ? Date.now()-timer.started : 0);}
   function clockFormat(ms) {let s=Math.max(0,Math.ceil(ms/1000));return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;}
@@ -147,9 +157,10 @@
   }
   function settingsPage() {
     const cfg=window.RusskiCloud.getConfig();
-    return `<div class="eyebrow">YOUR LITTLE SPACE</div><h1 class="page-title">Make it yours</h1><p class="subhead">Preferences, data backups and optional cloud sync.</p><div class="settings-layout"><div><section class="panel"><div class="panel-title"><div><h2>Study preferences</h2><p>Set a pace that feels good</p></div></div><div class="setting-row"><label class="field-label" for="your-name">Your name (shown on the dashboard)</label><div class="row"><input id="your-name" class="text-field" style="max-width:250px" value="${escape(state.name)}"><button class="btn small" data-action="save-name">Save</button></div></div><div class="setting-row"><div class="field-label">Daily study target</div><div class="segmented">${[30,45,60].map(n=>`<button class="segment ${state.dailyGoal===n?'selected':''}" data-action="goal" data-value="${n}">${n} min</button>`).join('')}</div></div></section><section class="panel"><div class="panel-title"><div><h2>Keep your progress safe</h2><p>Backups you control — no account required</p></div></div><div class="row"><button class="btn secondary" data-action="export">${icon('download')} Export JSON backup</button><button class="btn secondary" data-action="import">${icon('upload')} Import backup</button><input id="import-file" type="file" accept=".json,application/json" style="display:none"></div><p class="caution">Your lessons, words, minutes and journal are saved in this browser. Export a backup before clearing browsing data or changing devices.</p><div class="danger-zone"><button class="btn small critical" data-action="clear-data">Reset all local progress</button></div></section></div>
-    <div><section class="panel"><div class="panel-title"><div><h2>Cloud sync ☁</h2><p>Optional · Supabase database</p></div></div><div class="cloud-status" id="cloud-status">${escape(ui.cloudMessage)}</div><div class="setting-row"><label class="field-label" for="supabase-url">Project URL</label><input id="supabase-url" class="text-field" placeholder="https://your-project.supabase.co" value="${escape(cfg.url||'')}"></div><div class="setting-row"><label class="field-label" for="supabase-key">Publishable / anon key</label><input id="supabase-key" class="text-field" placeholder="sb_publishable_... or eyJ..." value="${escape(cfg.key||'')}"><p>This key is public by design. Never enter a <b>service_role</b> or secret key.</p></div><button class="btn secondary small" data-action="cloud-config">Save cloud configuration</button><div class="divider"></div><label class="field-label" for="cloud-email">Your sign-in email</label><input id="cloud-email" type="email" class="text-field" placeholder="you@example.com" style="margin-bottom:12px"><div class="row"><button class="btn small" data-action="cloud-login">Email me a sign-in link</button><button class="btn ghost small" data-action="cloud-check">Check login</button></div><div class="divider"></div><div class="row"><button class="btn secondary small" data-action="cloud-upload">${icon('upload')} Upload this device</button><button class="btn secondary small" data-action="cloud-download">${icon('download')} Load from cloud</button><button class="btn ghost small" data-action="cloud-logout">Sign out</button></div><p class="caution">Sync is manual in this version. Upload after studying; load on another device. Loading replaces this device’s progress (after confirmation). Setup steps are in the included README and SQL file.</p></section></div></div>`;
+    return `<div class="eyebrow">YOUR LITTLE SPACE</div><h1 class="page-title">Make it yours</h1><p class="subhead">Preferences, data backups and optional automatic cloud saving.</p><div class="settings-layout"><div><section class="panel"><div class="panel-title"><div><h2>Study preferences</h2><p>Set a pace that feels good</p></div></div><div class="setting-row"><label class="field-label" for="your-name">Your name (shown on the dashboard)</label><div class="row"><input id="your-name" class="text-field" style="max-width:250px" value="${escape(state.name)}"><button class="btn small" data-action="save-name">Save</button></div></div><div class="setting-row"><div class="field-label">Daily study target</div><div class="segmented">${[30,45,60].map(n=>`<button class="segment ${state.dailyGoal===n?'selected':''}" data-action="goal" data-value="${n}">${n} min</button>`).join('')}</div></div></section><section class="panel"><div class="panel-title"><div><h2>Keep your progress safe</h2><p>Backups you control — no account required</p></div></div><div class="row"><button class="btn secondary" data-action="export">${icon('download')} Export JSON backup</button><button class="btn secondary" data-action="import">${icon('upload')} Import backup</button><input id="import-file" type="file" accept=".json,application/json" style="display:none"></div><p class="caution">Your lessons, words, minutes and journal are saved in this browser too. Export a backup before clearing browsing data.</p><div class="danger-zone"><button class="btn small critical" data-action="clear-data">Reset study progress</button></div></section></div>
+    <div><section class="panel"><div class="panel-title"><div><h2>Cloud sync ☁</h2><p>Automatic · no login, no email</p></div></div><div class="cloud-status" id="cloud-status" aria-live="polite">${escape(ui.cloudMessage)}</div><p class="caution">Set this up once on each device. Your studies will sync automatically when you make changes and when you open the site.</p><div class="setting-row"><label class="field-label" for="supabase-url">Supabase Project URL</label><input id="supabase-url" class="text-field" placeholder="https://your-project.supabase.co" value="${escape(cfg.url||'')}"></div><div class="setting-row"><label class="field-label" for="supabase-key">Publishable / anon key</label><input id="supabase-key" class="text-field" placeholder="sb_publishable_... or eyJ..." value="${escape(cfg.key||'')}"><p>This is your <b>public</b> key. Never enter a service_role or secret key.</p></div><div class="setting-row"><label class="field-label" for="supabase-code">Your private sync code</label><input id="supabase-code" class="text-field" type="password" autocomplete="off" placeholder="xxxxxxxx-xxxx-4xxx-xxxx-xxxxxxxxxxxx" value="${escape(cfg.code||'')}"><p>Run the new <code>supabase-schema.sql</code> in Supabase SQL Editor. Copy the code from its result. Keep it private!</p></div><div class="row"><button class="btn small" data-action="cloud-config">${icon('cloud')} Connect &amp; sync</button><button class="btn ghost small" data-action="cloud-refresh">Check cloud</button></div><div class="divider"></div><div class="row"><button class="btn secondary small" data-action="cloud-upload">${icon('upload')} Keep this device</button><button class="btn secondary small" data-action="cloud-download">${icon('download')} Use cloud save</button></div><p class="caution">The buttons above are only for resolving conflicting progress or restoring backups. Normally you don't need to press anything — the site syncs itself. Your private code is saved only in this browser.</p></section></div></div>`;
   }
+
   function render() {
     const pages={dashboard,path:pathPage,lesson:lessonPage,words:wordsPage,practice:practicePage,grammar:grammarPage,journal:journalPage,settings:settingsPage};
     const page=pages[ui.page]||dashboard;
@@ -179,22 +190,111 @@
     else {interval=p.interval?Math.max(7,Math.round(p.interval*p.ease*1.3)):7;p.ease=Math.min(3.2,p.ease+.15);}
     p.reviewed++;p.interval=interval;p.due=addDays(today(),interval);state.cards[id]=p;save();
   }
-  async function handleCloud(action) {
-    const cloud=window.RusskiCloud;
+  // A checkpoint records what this particular device last synced. That lets us
+  // detect when two devices made different changes, rather than silently lose work.
+  const stateHash = (data) => {
+    const json=JSON.stringify(data);let h=2166136261;
+    for(let i=0;i<json.length;i++)h=Math.imul(h^json.charCodeAt(i),16777619);
+    return (h>>>0).toString(16)+':'+json.length;
+  };
+  function currentSignature() {
+    const c=window.RusskiCloud.getConfig();return `${c.url}|${c.code}`;
+  }
+  function checkpoint() {
     try {
-      if(action==='cloud-config'){cloud.setConfig($('#supabase-url').value,$('#supabase-key').value);ui.cloudMessage='Configuration saved on this device. Next, email yourself a sign-in link.';render();return;}
-      if(action==='cloud-login'){const email=$('#cloud-email').value.trim();if(!email){toast('Enter your email address first.');return;}await cloud.login(email);ui.cloudMessage='Check your email for a sign-in link, then return to this site.';}
-      if(action==='cloud-check'){const u=await cloud.user();ui.cloudMessage=u?`Signed in as ${u.email}. Cloud sync is ready.`:'Not signed in yet. Check your email for the link.';}
-      if(action==='cloud-logout'){await cloud.logout();ui.cloudMessage='Signed out of cloud sync. Local progress is still saved.';}
-      if(action==='cloud-upload'){if(!confirm('Upload this device’s progress? This replaces any older progress stored in the cloud.'))return;await cloud.upload(state);ui.cloudMessage='Uploaded! Your progress is saved to your Supabase account.';}
-      if(action==='cloud-download'){
-        const remote=await cloud.download();if(!remote){ui.cloudMessage='No cloud backup yet. Use “Upload this device” first.';}
-        else if(confirm(`Load your cloud backup from ${new Date(remote.updated_at).toLocaleString()}? This replaces progress on this device. Export a JSON backup first if needed.`)){
-          if(!validate(remote.payload))throw Error('The cloud backup is not a valid study-state file.');state={...defaultState(),...remote.payload};save();ui.cloudMessage='Cloud progress loaded successfully!';
-        }
-      }
-    }catch(err){ui.cloudMessage=`Cloud error: ${err.message||String(err)}`;}
+      const saved=JSON.parse(localStorage.getItem(CHECKPOINT_KEY)||'null');
+      return saved?.signature===currentSignature()?saved:null;
+    } catch {return null;}
+  }
+  function rememberCloud(revision,data=state) {
+    localStorage.setItem(CHECKPOINT_KEY,JSON.stringify({signature:currentSignature(),revision,hash:stateHash(data)}));
+  }
+  function hasStudyData(s) {
+    return !!(s.completed?.length || Object.keys(s.cards||{}).length || s.favorites?.length || Object.keys(s.days||{}).length || Object.keys(s.journal||{}).length || s.quizAnswered);
+  }
+  function cloudStatus(message) {
+    ui.cloudMessage=message;
+    const node=$('#cloud-status');if(node)node.textContent=message;
+  }
+  function applyCloud(remote) {
+    if(!validate(remote.payload))throw Error('Cloud state was not a valid study backup. No changes were made.');
+    state={...defaultState(),...remote.payload};
+    try {localStorage.setItem(STORE,JSON.stringify(state));} catch {throw Error('Could not store the cloud save in this browser.');}
+    rememberCloud(remote.revision,state);
     render();
+  }
+  let cloudBusy=false;
+  let cloudPending=false;
+  async function syncCloud({force=null}={}) {
+    if(!window.RusskiCloud.isConfigured()) return;
+    if(cloudBusy){cloudPending=true;return;}
+    cloudBusy=true;
+    try {
+      const cloud=window.RusskiCloud;
+      const remote=await cloud.download();
+      if(!remote || !Number.isInteger(remote.revision))throw Error('Cloud database not ready. Run the new supabase-schema.sql first.');
+      const cp=checkpoint();
+      const localHash=stateHash(state);
+      const remoteHasSave=remote.revision>0 && validate(remote.payload);
+
+      if(force==='download') {
+        if(!remoteHasSave)throw Error('There is no study progress in the cloud yet.');
+        if(!confirm('Use the cloud save? It will replace the progress currently in this browser. Export a JSON backup first if you need it.'))return;
+        applyCloud(remote);cloudStatus('☁ Cloud save loaded. Automatic sync is on!');return;
+      }
+      if(force==='upload') {
+        if(!confirm('Keep THIS device’s progress and replace the cloud save? Changes from other devices could be lost.'))return;
+        const sentState=JSON.parse(JSON.stringify(state));
+        const saved=await cloud.upload(sentState,remote.revision);
+        rememberCloud(saved.revision,sentState);
+        if(stateHash(state)!==stateHash(sentState))cloudPending=true;
+        cloudStatus('☁ This device saved to the cloud. Automatic sync is on!');return;
+      }
+      if(cp && cp.revision===remote.revision) {
+        if(cp.hash!==localHash) {
+          const sentState=JSON.parse(JSON.stringify(state));
+          const saved=await cloud.upload(sentState,remote.revision);
+          rememberCloud(saved.revision,sentState);
+          cloudStatus('☁ Saved automatically!');
+          // Another edit may have arrived while we were uploading.
+          if(stateHash(state)!==stateHash(sentState)) cloudPending=true;
+        } else cloudStatus('☁ All saved. Your devices are in sync ♡');
+      } else if(cp && cp.hash===localHash) {
+        if(remoteHasSave){applyCloud(remote);cloudStatus('☁ Updated with your latest cloud progress ♡');}
+        else {rememberCloud(remote.revision);cloudStatus('☁ Connected! Your next edit will save automatically.');}
+      } else if(!cp && !remoteHasSave) {
+        if(hasStudyData(state)) {
+          const sentState=JSON.parse(JSON.stringify(state));
+          const saved=await cloud.upload(sentState,remote.revision);
+          rememberCloud(saved.revision,sentState);
+          cloudStatus('☁ Your existing progress is backed up! Automatic sync is on.');
+          if(stateHash(state)!==stateHash(sentState))cloudPending=true;
+        } else {rememberCloud(remote.revision);cloudStatus('☁ Connected! Your next edit will save automatically.');}
+      } else if(!cp && remoteHasSave && !hasStudyData(state)) {
+        applyCloud(remote);cloudStatus('☁ Welcome back! Your progress was loaded automatically.');
+      } else {
+        // Two versions of work exist. No auto-merge without per-entry timestamps:
+        // warn and let the user explicitly choose instead of overwriting notes.
+        cloudStatus('⚠️ This device and the cloud have different changes. In Settings, choose “Keep this device” or “Use cloud save”. Export a JSON backup first if needed.');
+      }
+    } catch(err) {
+      cloudStatus(`⚠️ Cloud sync: ${err.message || String(err)}. Local saving still works.`);
+    } finally {
+      cloudBusy=false;
+      if(cloudPending){cloudPending=false;clearTimeout(cloudTimer);cloudTimer=setTimeout(()=>syncCloud(),800);}
+    }
+  }
+  async function handleCloud(action) {
+    try {
+      if(action==='cloud-config') {
+        window.RusskiCloud.setConfig($('#supabase-url').value,$('#supabase-key').value,$('#supabase-code').value);
+        cloudStatus('Connecting to your private cloud save…');
+        await syncCloud();return;
+      }
+      if(action==='cloud-refresh'){await syncCloud();return;}
+      if(action==='cloud-upload'){await syncCloud({force:'upload'});return;}
+      if(action==='cloud-download'){await syncCloud({force:'download'});return;}
+    } catch(err) {cloudStatus(`⚠️ Cloud sync: ${err.message || String(err)}`);}
   }
   document.addEventListener('click',async e=>{
     const el=e.target.closest('[data-go],[data-lesson],[data-action],[data-grade],[data-quiz],[data-fav],[data-speak],[data-grammar]');if(!el)return;
@@ -222,7 +322,7 @@
     if(a==='save-name'){const val=$('#your-name').value.trim();if(val.length<1||val.length>40){toast('Please enter a name between 1 and 40 characters.');return;}state.name=val;save();render();toast('Name updated!');return;}
     if(a==='export'){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=`russki-backup-${today()}.json`;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),3000);toast('Backup downloaded. Keep it somewhere safe!');return;}
     if(a==='import'){$('#import-file').click();return;}
-    if(a==='clear-data'){if(confirm('Really reset your lessons, word progress, study minutes AND journal from this device? This cannot be undone unless you made a backup.')){state=defaultState();save();ui.cloudMessage='Local study progress reset. Your cloud backup was not changed.';render();toast('Local progress reset.');}return;}
+    if(a==='clear-data'){if(confirm('Really reset ALL your study progress? If cloud sync is enabled, the reset will sync to your other devices too. Export a JSON backup first.')){state=defaultState();save();cloudStatus('Local progress reset. The cloud will update automatically if connected.');render();toast('Study progress reset.');}return;}
     if(a.startsWith('cloud-')){await handleCloud(a);return;}
   });
   document.addEventListener('input',e=>{
@@ -257,4 +357,7 @@
   window.addEventListener('hashchange',parseRoute);
   setInterval(()=>{if(!timer.running)return;const el=$('#timer-display');if(el)el.textContent=clockFormat(timeElapsed());},1000);
   if(!location.hash)location.hash='#/dashboard';parseRoute();
+  if(window.RusskiCloud?.isConfigured())setTimeout(()=>syncCloud(),100);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncCloud();});
+  window.addEventListener('focus',()=>syncCloud());
 })();
